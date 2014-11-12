@@ -1,3 +1,6 @@
+/**
+ * Copyright (C) 2014 Typesafe Inc. <http://www.typesafe.com>
+ */
 package akka.stream.impl.fusing
 
 import akka.stream.testkit.AkkaSpec
@@ -53,7 +56,9 @@ class IteratorInterpreterSpec extends AkkaSpec {
         })).iterator
 
       itr.next() should be(1)
+      itr.hasNext should be(true)
       a[ArithmeticException] should be thrownBy { itr.next() }
+      itr.hasNext should be(false)
     }
 
     "throw exceptions when op in chain throws" in {
@@ -66,7 +71,9 @@ class IteratorInterpreterSpec extends AkkaSpec {
         })).iterator
 
       itr.next() should be(1)
+      itr.hasNext should be(true)
       a[ArithmeticException] should be thrownBy { itr.next() }
+      itr.hasNext should be(false)
     }
 
     "work with an empty iterator" in {

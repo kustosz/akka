@@ -9,10 +9,14 @@ import akka.stream.impl.ActorBasedFlowMaterializer
 import akka.util.ByteString
 import akka.event.LoggingAdapter
 import akka.stream.scaladsl._
-import akka.stream.Transformer
 import akka.http.model._
 import akka.http.util._
 import org.reactivestreams.Subscriber
+import akka.stream.impl.fusing.Context
+import akka.stream.impl.fusing.Directive
+import akka.stream.impl.fusing.DeterministicOp
+import akka.stream.impl.fusing.TransitivePullOp
+import akka.stream.impl.fusing.TerminationDirective
 
 /**
  * INTERNAL API
@@ -45,38 +49,51 @@ private object RenderSupport {
       r ~~ headers.`Content-Type` ~~ entity.contentType ~~ CrLf
 
   def renderByteStrings(r: ByteStringRendering, entityBytes: ⇒ Source[ByteString],
-                        skipEntity: Boolean = false): List[Source[ByteString]] = {
-    val messageStart = Source(r.get :: Nil)
+                        skipEntity: Boolean = false): Source[ByteString] = {
+    val messageStart = Source.singleton(r.get)
     val messageBytes =
       if (!skipEntity) messageStart ++ entityBytes
       else CancelSecond(messageStart, entityBytes)
-    messageBytes :: Nil
+    messageBytes
   }
 
-  class ChunkTransformer extends Transformer[HttpEntity.ChunkStreamPart, ByteString] {
+  class ChunkTransformer extends DeterministicOp[HttpEntity.ChunkStreamPart, ByteString] {
     var lastChunkSeen = false
-    def onNext(chunk: HttpEntity.ChunkStreamPart): List[ByteString] = {
+
+    override def onPush(chunk: HttpEntity.ChunkStreamPart, ctxt: Context[ByteString]): Directive = {
       if (chunk.isLastChunk) lastChunkSeen = true
-      renderChunk(chunk) :: Nil
+      ctxt.push(renderChunk(chunk))
     }
-    override def isComplete = lastChunkSeen
-    override def onTermination(e: Option[Throwable]) = if (lastChunkSeen) Nil else defaultLastChunkBytes :: Nil
+
+    override def onPull(ctxt: Context[ByteString]): Directive = {
+      val finishing = isFinishing
+      if (finishing && !lastChunkSeen)
+        ctxt.pushAndFinish(defaultLastChunkBytes)
+      else if (finishing)
+        ctxt.finish()
+      else
+        ctxt.pull()
+    }
+
+    override def onUpstreamFinish(ctxt: Context[ByteString]): TerminationDirective = ctxt.absorbTermination()
   }
 
-  class CheckContentLengthTransformer(length: Long) extends Transformer[ByteString, ByteString] {
+  class CheckContentLengthTransformer(length: Long) extends TransitivePullOp[ByteString, ByteString] {
     var sent = 0L
-    def onNext(elem: ByteString): List[ByteString] = {
+
+    override def onPush(elem: ByteString, ctxt: Context[ByteString]): Directive = {
       sent += elem.length
       if (sent > length)
         throw new InvalidContentLengthException(s"HTTP message had declared Content-Length $length but entity data stream amounts to more bytes")
-      elem :: Nil
+      ctxt.push(elem)
     }
 
-    override def onTermination(e: Option[Throwable]): List[ByteString] = {
+    override def onUpstreamFinish(ctxt: Context[ByteString]): TerminationDirective = {
       if (sent < length)
         throw new InvalidContentLengthException(s"HTTP message had declared Content-Length $length but entity data stream amounts to ${length - sent} bytes less")
-      Nil
+      ctxt.finish()
     }
+
   }
 
   private def renderChunk(chunk: HttpEntity.ChunkStreamPart): ByteString = {

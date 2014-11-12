@@ -31,7 +31,7 @@ trait InterpreterSpecKit extends AkkaSpec {
     }
   }
 
-  abstract class TestSetup(ops: Seq[Op[_, _, _, _, _]], forkLimit: Int = 100, overflowToHeap: Boolean = false) {
+  abstract class TestSetup(ops: Seq[Op[_, _]], forkLimit: Int = 100, overflowToHeap: Boolean = false) {
     private var lastEvent: Set[Any] = Set.empty
 
     val upstream = new UpstreamProbe

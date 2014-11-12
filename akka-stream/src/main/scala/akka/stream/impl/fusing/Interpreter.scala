@@ -11,13 +11,18 @@ import scala.util.control.NonFatal
 // implement grouped, buffer
 // add recover
 
-trait Op[In, Out, PushD <: Directive, PullD <: Directive, Ctxt <: Context[Out]] {
+trait Op[-In, Out] {
+  type PushD <: Directive
+  type PullD <: Directive
+  type Ctxt <: Context[Out]
+
   private[fusing] var holding = false
   private[fusing] var allowedToPush = false
   private[fusing] var terminationPending = false
 
-  def isHolding: Boolean = holding
-  def isFinishing: Boolean = terminationPending
+  final def isHolding: Boolean = holding
+  final def isFinishing: Boolean = terminationPending
+
   def onPush(elem: In, ctxt: Ctxt): PushD
   def onPull(ctxt: Ctxt): PullD
   def onUpstreamFinish(ctxt: Ctxt): TerminationDirective = ctxt.finish()
@@ -25,9 +30,41 @@ trait Op[In, Out, PushD <: Directive, PullD <: Directive, Ctxt <: Context[Out]] 
   def onFailure(cause: Throwable, ctxt: Ctxt): TerminationDirective = ctxt.fail(cause)
 }
 
-trait DeterministicOp[In, Out] extends Op[In, Out, Directive, Directive, Context[Out]]
-trait DetachedOp[In, Out] extends Op[In, Out, UpstreamDirective, DownstreamDirective, DetachedContext[Out]]
-trait BoundaryOp extends Op[Any, Any, Directive, Directive, BoundaryContext] {
+trait Become[In, Out] { self: DeterministicOp[In, Out] ⇒
+
+  private var _current = initial
+
+  def initial: DeterministicOp[In, Out]
+
+  final def current: DeterministicOp[In, Out] = _current
+
+  final def become(state: DeterministicOp[In, Out]): Unit = _current = state
+
+  final override def onPush(elem: In, ctxt: Ctxt): PushD = _current.onPush(elem, ctxt)
+  final override def onPull(ctxt: Ctxt): PullD = _current.onPull(ctxt)
+  final override def onUpstreamFinish(ctxt: Ctxt): TerminationDirective = _current.onUpstreamFinish(ctxt)
+  final override def onDownstreamFinish(ctxt: Ctxt): TerminationDirective = _current.onDownstreamFinish(ctxt)
+  final override def onFailure(cause: Throwable, ctxt: Ctxt): TerminationDirective =
+    _current.onFailure(cause, ctxt)
+
+}
+
+trait DeterministicOp[In, Out] extends Op[In, Out] {
+  type PushD = Directive
+  type PullD = Directive
+  type Ctxt = Context[Out]
+}
+
+trait DetachedOp[In, Out] extends Op[In, Out] {
+  type PushD = UpstreamDirective
+  type PullD = DownstreamDirective
+  type Ctxt = DetachedContext[Out]
+}
+
+trait BoundaryOp extends Op[Any, Any] {
+  type PushD = Directive
+  type PullD = Directive
+  type Ctxt = BoundaryContext
   private[fusing] var bctxt: BoundaryContext = _
   def enter(): BoundaryContext = bctxt
 }
@@ -160,9 +197,13 @@ object OneBoundedInterpreter {
  * testing and finding callstack wasting bugs), in the other case the forked call is scheduled via a list -- i.e. instead
  * of the stack the heap is used.
  */
-class OneBoundedInterpreter(ops: Seq[Op[_, _, _, _, _]], val forkLimit: Int = 100, val overflowToHeap: Boolean = true) {
+class OneBoundedInterpreter(ops: Seq[Op[_, _]], val forkLimit: Int = 100, val overflowToHeap: Boolean = true) {
   import OneBoundedInterpreter._
-  type UntypedOp = Op[Any, Any, Directive, Directive, DetachedContext[Any]]
+  type UntypedOp = Op[Any, Any] {
+    type PushD = Directive
+    type PullD = Directive
+    type Ctxt = DetachedContext[Any]
+  }
   require(ops.nonEmpty, "OneBoundedInterpreter cannot be created without at least one Op")
 
   private val pipeline = ops.toArray.asInstanceOf[Array[UntypedOp]]
@@ -317,6 +358,12 @@ class OneBoundedInterpreter(ops: Seq[Op[_, _, _, _, _]], val forkLimit: Int = 10
       elementInFlight = null
       pipeline(activeOp) = Finished.asInstanceOf[UntypedOp]
       activeOp += 1
+
+      if (activeOp == pipeline.length) {
+        // FIXME this is a bug, ArrayIndexOutOfBoundsException in FileAndResourceDirectivesSpec
+        new RuntimeException(s"# Completing activeOp OutOfBounds $activeOp").printStackTrace()
+      }
+
       if (!pipeline(activeOp).isFinishing) pipeline(activeOp).onUpstreamFinish(ctxt = this)
       else exit()
     }
@@ -341,6 +388,12 @@ class OneBoundedInterpreter(ops: Seq[Op[_, _, _, _, _]], val forkLimit: Int = 10
       elementInFlight = null
       pipeline(activeOp) = Finished.asInstanceOf[UntypedOp]
       activeOp -= 1
+
+      if (activeOp == -1) {
+        // FIXME this is a bug, ArrayIndexOutOfBoundsException in FileAndResourceDirectivesSpec
+        new RuntimeException(s"# Cancelling activeOp OutOfBounds $activeOp").printStackTrace()
+      }
+
       if (!pipeline(activeOp).isFinishing) pipeline(activeOp).onDownstreamFinish(ctxt = this)
       else exit()
     }
@@ -421,7 +474,6 @@ class OneBoundedInterpreter(ops: Seq[Op[_, _, _, _, _]], val forkLimit: Int = 10
     state = forkState
     execute()
     activeOp = savePos
-    PhantomDirective
   }
 
   def init(): Unit = {

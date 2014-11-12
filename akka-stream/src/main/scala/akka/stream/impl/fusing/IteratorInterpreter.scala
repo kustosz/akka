@@ -56,16 +56,20 @@ object IteratorInterpreter {
 
     override def hasNext: Boolean = {
       if (!done) pullIfNeeded()
-      !(done && needsPull)
+      !(done && needsPull) || (lastError != null)
     }
 
     override def next(): T = {
-      if (!hasNext) {
-        if (lastError != null) throw lastError
-        else Iterator.empty.next()
+      if (lastError != null) {
+        val e = lastError
+        lastError = null
+        throw e
+      } else if (!hasNext)
+        Iterator.empty.next()
+      else {
+        needsPull = true
+        nextElem
       }
-      needsPull = true
-      nextElem
     }
 
   }
@@ -76,7 +80,7 @@ class IteratorInterpreter[I, O](val input: Iterator[I], val ops: Seq[Determinist
 
   private val upstream = IteratorUpstream(input)
   private val downstream = IteratorDownstream[O]()
-  private val interpreter = new OneBoundedInterpreter(upstream +: ops.asInstanceOf[Seq[Op[_, _, _, _, _]]] :+ downstream)
+  private val interpreter = new OneBoundedInterpreter(upstream +: ops.asInstanceOf[Seq[Op[_, _]]] :+ downstream)
   interpreter.init()
 
   def iterator: Iterator[O] = downstream

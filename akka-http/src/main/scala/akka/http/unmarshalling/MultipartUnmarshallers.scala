@@ -15,6 +15,8 @@ import akka.stream.scaladsl._
 import MediaRanges._
 import MediaTypes._
 import HttpCharsets._
+import akka.stream.impl.fusing.IteratorInterpreter
+import akka.util.ByteString
 
 trait MultipartUnmarshallers {
 
@@ -67,7 +69,10 @@ trait MultipartUnmarshallers {
               entity match {
                 case HttpEntity.Strict(ContentType(mediaType: MultipartMediaType, _), data) ⇒
                   val builder = new VectorBuilder[BPS]()
-                  (parser.onNext(data) ++ parser.onTermination(None)) foreach {
+                  val iter = new IteratorInterpreter[ByteString, BodyPartParser.Output](
+                    Iterator.single(data), List(parser)).iterator
+                  // note that iter.next() will throw exception if stream fails
+                  iter.foreach {
                     case BodyPartStart(headers, createEntity) ⇒
                       val entity = createEntity(Source.empty()) match {
                         case x: HttpEntity.Strict ⇒ x
