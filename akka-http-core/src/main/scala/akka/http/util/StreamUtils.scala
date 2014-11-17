@@ -67,6 +67,9 @@ private[http] object StreamUtils {
   }
 
   def sliceBytesTransformer(start: Long, length: Long): Flow[ByteString, ByteString] = {
+
+    println(s"# sliceBytesTransformer $start $length") // FIXME
+
     val transformer = new DeterministicOp[ByteString, ByteString] with Become[ByteString, ByteString] {
       type State = TransitivePullOp[ByteString, ByteString]
 
@@ -87,9 +90,10 @@ private[http] object StreamUtils {
         var remaining: Long = initiallyRemaining
         override def onPush(element: ByteString, ctxt: Context[ByteString]): Directive = {
           val data = element.take(math.min(remaining, Int.MaxValue).toInt)
+          println(s"# onPush remaining: $remaining element: $element data: $data") // FIXME
           remaining -= data.size
-          if (remaining <= 0) ctxt.finish()
-          ctxt.push(data)
+          if (remaining <= 0) ctxt.pushAndFinish(data)
+          else ctxt.push(data)
         }
       }
 

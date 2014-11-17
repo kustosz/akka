@@ -361,7 +361,8 @@ class OneBoundedInterpreter(ops: Seq[Op[_, _]], val forkLimit: Int = 100, val ov
 
       if (activeOp == pipeline.length) {
         // FIXME this is a bug, ArrayIndexOutOfBoundsException in FileAndResourceDirectivesSpec
-        new RuntimeException(s"# Completing activeOp OutOfBounds $activeOp").printStackTrace()
+        //        new RuntimeException(s"# Completing activeOp OutOfBounds $activeOp").printStackTrace()
+        println(s"# Completing activeOp OutOfBounds $activeOp") // FIXME
       }
 
       if (!pipeline(activeOp).isFinishing) pipeline(activeOp).onUpstreamFinish(ctxt = this)
@@ -391,7 +392,8 @@ class OneBoundedInterpreter(ops: Seq[Op[_, _]], val forkLimit: Int = 100, val ov
 
       if (activeOp == -1) {
         // FIXME this is a bug, ArrayIndexOutOfBoundsException in FileAndResourceDirectivesSpec
-        new RuntimeException(s"# Cancelling activeOp OutOfBounds $activeOp").printStackTrace()
+        //        new RuntimeException(s"# Cancelling activeOp OutOfBounds $activeOp").printStackTrace()
+        println(s"# Cancelling activeOp OutOfBounds $activeOp") // FIXME
       }
 
       if (!pipeline(activeOp).isFinishing) pipeline(activeOp).onDownstreamFinish(ctxt = this)
