@@ -16,42 +16,36 @@ import headers._
 import HttpProtocols._
 import akka.stream.impl.fusing.Context
 import akka.stream.impl.fusing.Directive
-import akka.stream.impl.fusing.DeterministicOp
+import akka.stream.impl.fusing.RichDeterministicOp
 
 /**
  * INTERNAL API
  */
 private[http] abstract class HttpMessageParser[Output >: ParserOutput.MessageOutput <: ParserOutput](val settings: ParserSettings,
                                                                                                      val headerParser: HttpHeaderParser)
-  extends DeterministicOp[ByteString, Output] {
+  extends RichDeterministicOp[ByteString, Output] {
   import settings._
 
   sealed trait StateResult // phantom type for ensuring soundness of our parsing method setup
 
   private[this] val result = new ListBuffer[Output] // transformer op is currently optimized for LinearSeqs
-  private[this] var resultIterator: Iterator[Output] = Iterator.empty
   private[this] var state: ByteString ⇒ StateResult = startNewMessage(_, 0)
   private[this] var protocol: HttpProtocol = `HTTP/1.1`
   private[this] var terminated = false
 
-  override def onPush(input: ByteString, ctxt: Context[Output]): Directive = {
-    result.clear()
-    try state(input)
-    catch {
-      case e: ParsingException    ⇒ fail(e.status, e.info)
-      case NotEnoughDataException ⇒ throw new IllegalStateException // we are missing a try/catch{continue} wrapper somewhere
+  override def initial = new State {
+    override def onPush(input: ByteString, ctxt: Context[Output]): Directive = {
+      result.clear()
+      try state(input)
+      catch {
+        case e: ParsingException    ⇒ fail(e.status, e.info)
+        case NotEnoughDataException ⇒ throw new IllegalStateException // we are missing a try/catch{continue} wrapper somewhere
+      }
+      val resultIterator = result.toList.iterator
+      if (terminated) emitAndFinish(resultIterator, ctxt)
+      else emit(resultIterator, ctxt)
     }
-    resultIterator = result.toList.iterator
-    val empty = resultIterator.isEmpty
-    if (empty && terminated) ctxt.finish() // FIXME verify usage of terminated
-    else if (empty) ctxt.pull()
-    else ctxt.push(resultIterator.next())
   }
-
-  override def onPull(ctxt: Context[Output]): Directive =
-    if (resultIterator.hasNext) ctxt.push(resultIterator.next())
-    else if (terminated) ctxt.finish() // FIXME verify usage of terminated
-    else ctxt.pull()
 
   def startNewMessage(input: ByteString, offset: Int): StateResult = {
     def _startNewMessage(input: ByteString, offset: Int): StateResult =

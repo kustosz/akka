@@ -30,23 +30,93 @@ trait Op[-In, Out] {
   def onFailure(cause: Throwable, ctxt: Ctxt): TerminationDirective = ctxt.fail(cause)
 }
 
-trait Become[In, Out] { self: DeterministicOp[In, Out] ⇒
+// FIXME name?
+trait RichDeterministicOp[In, Out] extends DeterministicOp[In, Out] {
+  trait State {
+    def onPush(elem: In, ctxt: Ctxt): PushD
+    def onPull(ctxt: Ctxt): PullD = ctxt.pull()
+  }
 
-  private var _current = initial
+  private var emitting = false
+  private var _current: State = _
+  become(initial)
 
-  def initial: DeterministicOp[In, Out]
+  def initial: State
 
-  final def current: DeterministicOp[In, Out] = _current
+  final def current: State = _current
 
-  final def become(state: DeterministicOp[In, Out]): Unit = _current = state
+  final def become(state: State): Unit = {
+    if (state == null) throw new NullPointerException
+    _current = state
+  }
 
   final override def onPush(elem: In, ctxt: Ctxt): PushD = _current.onPush(elem, ctxt)
   final override def onPull(ctxt: Ctxt): PullD = _current.onPull(ctxt)
-  final override def onUpstreamFinish(ctxt: Ctxt): TerminationDirective = _current.onUpstreamFinish(ctxt)
-  final override def onDownstreamFinish(ctxt: Ctxt): TerminationDirective = _current.onDownstreamFinish(ctxt)
-  final override def onFailure(cause: Throwable, ctxt: Ctxt): TerminationDirective =
-    _current.onFailure(cause, ctxt)
 
+  override def onUpstreamFinish(ctxt: Ctxt): TerminationDirective =
+    if (emitting) ctxt.absorbTermination()
+    else ctxt.finish()
+
+  final def emit(iter: Iterator[Out], ctxt: Ctxt): PushD = emit(iter, ctxt, _current)
+
+  final def emit(iter: Iterator[Out], ctxt: Ctxt, andThenBecome: State): PushD = {
+    if (emitting) throw new IllegalStateException("already in emitting state")
+    if (iter.isEmpty) {
+      become(andThenBecome)
+      ctxt.pull()
+    } else {
+      val elem = iter.next()
+      if (iter.hasNext) {
+        emitting = true
+        become(emittingState(iter, Some(andThenBecome)))
+      }
+      ctxt.push(elem)
+    }
+  }
+
+  final def emitAndFinish(iter: Iterator[Out], ctxt: Ctxt): PushD = {
+    if (emitting) throw new IllegalStateException("already in emitting state")
+    if (iter.isEmpty)
+      ctxt.finish()
+    else {
+      val elem = iter.next()
+      if (iter.hasNext) {
+        emitting = true
+        become(emittingState(iter, andThenBecome = None))
+        ctxt.push(elem)
+      } else
+        ctxt.pushAndFinish(elem)
+    }
+  }
+
+  final def terminationEmit(iter: Iterator[Out], ctxt: Ctxt): TerminationDirective = {
+    val empty = iter.isEmpty
+    if (empty && emitting) ctxt.absorbTermination()
+    else if (empty) ctxt.finish()
+    else {
+      become(emittingState(iter, andThenBecome = None))
+      ctxt.absorbTermination()
+    }
+  }
+
+  private def emittingState(iter: Iterator[Out], andThenBecome: Option[State]) = new State {
+    override def onPush(elem: In, ctxt: Ctxt) = throw new IllegalStateException
+    override def onPull(ctxt: Ctxt) = {
+      if (iter.hasNext) {
+        val elem = iter.next()
+        val empty = iter.isEmpty
+        if (empty && (isFinishing || andThenBecome.isEmpty))
+          ctxt.pushAndFinish(elem)
+        else if (empty) {
+          emitting = false
+          andThenBecome.foreach(become)
+          ctxt.push(elem)
+        } else
+          ctxt.push(elem)
+      } else
+        throw new IllegalStateException
+    }
+  }
 }
 
 trait DeterministicOp[In, Out] extends Op[In, Out] {

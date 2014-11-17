@@ -17,9 +17,6 @@ import akka.stream.scaladsl._
 import akka.stream.TimerTransformer
 import akka.http.util._
 import japi.JavaMapping.Implicits._
-import akka.stream.impl.fusing.Context
-import akka.stream.impl.fusing.Directive
-import akka.stream.impl.fusing.DeterministicOp
 import scala.util.Success
 import scala.util.Failure
 

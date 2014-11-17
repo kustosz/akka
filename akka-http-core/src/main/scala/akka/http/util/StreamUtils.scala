@@ -18,7 +18,7 @@ import akka.stream.{ impl, FlowMaterializer }
 import akka.stream.scaladsl._
 import akka.http.model.RequestEntity
 import akka.stream.impl.fusing.TransitivePullOp
-import akka.stream.impl.fusing.Become
+import akka.stream.impl.fusing.RichDeterministicOp
 import akka.stream.impl.fusing.TerminationDirective
 import akka.stream.scaladsl.Pipe
 import akka.stream.impl.fusing.IteratorInterpreter
@@ -67,11 +67,7 @@ private[http] object StreamUtils {
   }
 
   def sliceBytesTransformer(start: Long, length: Long): Flow[ByteString, ByteString] = {
-
-    println(s"# sliceBytesTransformer $start $length") // FIXME
-
-    val transformer = new DeterministicOp[ByteString, ByteString] with Become[ByteString, ByteString] {
-      type State = TransitivePullOp[ByteString, ByteString]
+    val transformer = new RichDeterministicOp[ByteString, ByteString] {
 
       def skipping = new State {
         var toSkip = start

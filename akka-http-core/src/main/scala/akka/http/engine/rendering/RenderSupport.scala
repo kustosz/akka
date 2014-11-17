@@ -14,7 +14,7 @@ import akka.http.util._
 import org.reactivestreams.Subscriber
 import akka.stream.impl.fusing.Context
 import akka.stream.impl.fusing.Directive
-import akka.stream.impl.fusing.DeterministicOp
+import akka.stream.impl.fusing.RichDeterministicOp
 import akka.stream.impl.fusing.TransitivePullOp
 import akka.stream.impl.fusing.TerminationDirective
 
@@ -57,25 +57,19 @@ private object RenderSupport {
     messageBytes
   }
 
-  class ChunkTransformer extends DeterministicOp[HttpEntity.ChunkStreamPart, ByteString] {
+  class ChunkTransformer extends RichDeterministicOp[HttpEntity.ChunkStreamPart, ByteString] {
     var lastChunkSeen = false
 
-    override def onPush(chunk: HttpEntity.ChunkStreamPart, ctxt: Context[ByteString]): Directive = {
-      if (chunk.isLastChunk) lastChunkSeen = true
-      ctxt.push(renderChunk(chunk))
+    override def initial = new State {
+      override def onPush(chunk: HttpEntity.ChunkStreamPart, ctxt: Context[ByteString]): Directive = {
+        if (chunk.isLastChunk) lastChunkSeen = true
+        ctxt.push(renderChunk(chunk))
+      }
     }
 
-    override def onPull(ctxt: Context[ByteString]): Directive = {
-      val finishing = isFinishing
-      if (finishing && !lastChunkSeen)
-        ctxt.pushAndFinish(defaultLastChunkBytes)
-      else if (finishing)
-        ctxt.finish()
-      else
-        ctxt.pull()
-    }
-
-    override def onUpstreamFinish(ctxt: Context[ByteString]): TerminationDirective = ctxt.absorbTermination()
+    override def onUpstreamFinish(ctxt: Context[ByteString]): TerminationDirective =
+      if (lastChunkSeen) super.onUpstreamFinish(ctxt)
+      else terminationEmit(Iterator.single(defaultLastChunkBytes), ctxt)
   }
 
   class CheckContentLengthTransformer(length: Long) extends TransitivePullOp[ByteString, ByteString] {
