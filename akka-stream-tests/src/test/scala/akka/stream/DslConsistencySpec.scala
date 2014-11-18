@@ -1,4 +1,3 @@
-/* FIXME enable this test again
 /**
  * Copyright (C) 2014 Typesafe Inc. <http://www.typesafe.com>
  */
@@ -91,4 +90,3 @@ class DslConsistencySpec extends WordSpec with Matchers {
   }
 
 }
-*/

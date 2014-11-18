@@ -4,13 +4,12 @@
 package akka.stream.javadsl
 
 import akka.stream._
-
 import akka.japi.Util
 import akka.stream.scaladsl
-
 import scala.annotation.unchecked.uncheckedVariance
 import scala.concurrent.Future
 import scala.concurrent.duration.FiniteDuration
+import akka.stream.impl.fusing.OpApi
 
 object Flow {
 
@@ -272,7 +271,9 @@ class Flow[-In, +Out](delegate: scaladsl.Flow[In, Out]) {
   def buffer(size: Int, overflowStrategy: OverflowStrategy): javadsl.Flow[In, Out] =
     new Flow(delegate.buffer(size, overflowStrategy))
 
-  // FIXME add Op based transform
+  // FIXME docs
+  def transform[U](name: String, mkTransformer: japi.Creator[OpApi[Out, U]]): javadsl.Flow[In, U] =
+    new Flow(delegate.transform(name, () ⇒ mkTransformer.create()))
 
   /**
    * Transformation of a stream, with additional support for scheduled events.

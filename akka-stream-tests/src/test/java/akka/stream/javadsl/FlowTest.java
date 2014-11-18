@@ -1,5 +1,6 @@
-/* FIXME enable this test again
 package akka.stream.javadsl;
+
+import scala.collection.generic.BitOperations.Int;
 
 import akka.actor.ActorRef;
 import akka.dispatch.Foreach;
@@ -9,9 +10,18 @@ import akka.japi.Pair;
 import akka.japi.Util;
 import akka.stream.OverflowStrategy;
 import akka.stream.StreamTest;
+import akka.stream.impl.fusing.DeterministicOp;
+import akka.stream.impl.fusing.OpApi;
+import akka.stream.impl.fusing.TransitivePullOp;
+import akka.stream.impl.fusing.RichDeterministicOp;
+import akka.stream.impl.fusing.RichDeterministicOpState;
+import akka.stream.impl.fusing.Directive;
+import akka.stream.impl.fusing.TerminationDirective;
+import akka.stream.impl.fusing.Context;
 import akka.stream.javadsl.japi.*;
 import akka.stream.testkit.AkkaSpec;
 import akka.testkit.JavaTestKit;
+
 import org.junit.ClassRule;
 import org.junit.Test;
 import org.reactivestreams.Publisher;
@@ -23,11 +33,9 @@ import scala.concurrent.duration.Duration;
 import scala.concurrent.duration.FiniteDuration;
 import scala.runtime.BoxedUnit;
 import scala.util.Try;
-
 import java.util.*;
 import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
-
 import static org.junit.Assert.assertEquals;
 
 public class FlowTest extends StreamTest {
@@ -107,34 +115,35 @@ public class FlowTest extends StreamTest {
     final JavaTestKit probe2 = new JavaTestKit(system);
     final Iterable<Integer> input = Arrays.asList(0, 1, 2, 3, 4, 5, 6, 7);
     // duplicate each element, stop after 4 elements, and emit sum to the end
-    Source.from(input).transform("publish", new Creator<Transformer<Integer, Integer>>() {
+    Source.from(input).transform("publish", new Creator<OpApi<Integer, Integer>>() {
       @Override
-      public Transformer<Integer, Integer> create() throws Exception {
-        return new Transformer<Integer, Integer>() {
+      public DeterministicOp<Integer, Integer> create() throws Exception {
+        return new RichDeterministicOp<Integer, Integer>() {
           int sum = 0;
           int count = 0;
 
           @Override
-          public scala.collection.immutable.Seq<Integer> onNext(Integer element) {
-            sum += element;
-            count += 1;
-            return Util.immutableSeq(new Integer[] { element, element });
+          public RichDeterministicOpState<Integer, Integer> initial() {
+            return new RichDeterministicOpState<Integer, Integer>() {
+              @Override
+              public Directive onPush(Integer element, Context<Integer> ctxt) {
+                sum += element;
+                count += 1;
+                if (count == 4) {
+                  return emitAndFinish(Arrays.asList(element, element, sum).iterator(), ctxt);
+                } else {
+                  return emit(Arrays.asList(element, element).iterator(), ctxt);
+                }
+              }
+              
+            };
           }
-
+          
           @Override
-          public boolean isComplete() {
-            return count == 4;
+          public TerminationDirective onUpstreamFinish(Context<Integer> ctxt) {
+            return terminationEmit(Collections.singletonList(sum).iterator(), ctxt);
           }
-
-          @Override
-          public scala.collection.immutable.Seq<Integer> onTermination(Option<Throwable> e) {
-            return Util.immutableSingletonSeq(sum);
-          }
-
-          @Override
-          public void cleanup() {
-            probe2.getRef().tell("cleanup", ActorRef.noSender());
-          }
+          
         };
       }
     }).foreach(new Procedure<Integer>() {
@@ -152,9 +161,10 @@ public class FlowTest extends StreamTest {
     probe.expectMsgEquals(3);
     probe.expectMsgEquals(3);
     probe.expectMsgEquals(6);
-    probe2.expectMsgEquals("cleanup");
   }
 
+
+  /* FIXME
   @Test
   public void mustBeAbleToUseTransformRecover() {
     final JavaTestKit probe = new JavaTestKit(system);
@@ -213,6 +223,7 @@ public class FlowTest extends StreamTest {
     probe.expectMsgEquals("6");
     probe.expectMsgEquals("4 not allowed");
   }
+  */
 
   @Test
   public void mustBeAbleToUseGroupBy() {
@@ -291,14 +302,19 @@ public class FlowTest extends StreamTest {
 
   }
 
-  public <In, Out> Creator<Transformer<In, Out>> op() {
-    return new akka.stream.javadsl.japi.Creator<Transformer<In, Out>>() {
+  public <T> Creator<OpApi<T, T>> op() {
+    return new akka.stream.javadsl.japi.Creator<OpApi<T, T>>() {
       @Override
-      public Transformer<In, Out> create() throws Exception {
-        return new Transformer<In, Out>() {
+      public DeterministicOp<T, T> create() throws Exception {
+        return new DeterministicOp<T, T>() {  
           @Override
-          public Seq<Out> onNext(In element) {
-            return Util.immutableSeq(Collections.singletonList((Out) element)); // TODO needs helpers
+          public Directive onPush(T element, Context<T> ctxt) {
+            return ctxt.push(element);
+          }
+          
+          @Override
+          public Directive onPull(Context<T> ctxt) {
+            return ctxt.pull();
           }
         };
       }
@@ -307,9 +323,9 @@ public class FlowTest extends StreamTest {
 
   @Test
   public void mustBeAbleToUseMerge() throws Exception {
-    final Flow<String, String> f1 = Flow.of(String.class).transform("f1", this.<String, String>op()); // javadsl
-    final Flow<String, String> f2 = Flow.of(String.class).transform("f2", this.<String, String>op()); // javadsl
-    final Flow<String, String> f3 = Flow.of(String.class).transform("f2", this.<String, String>op()); // javadsl
+    final Flow<String, String> f1 = Flow.of(String.class).transform("f1", this.<String>op()); // javadsl
+    final Flow<String, String> f2 = Flow.of(String.class).transform("f2", this.<String>op()); // javadsl
+    final Flow<String, String> f3 = Flow.of(String.class).transform("f2", this.<String>op()); // javadsl
 
     final Source<String> in1 = Source.from(Arrays.asList("a", "b", "c"));
     final Source<String> in2 = Source.from(Arrays.asList("d", "e", "f"));
@@ -616,4 +632,3 @@ public class FlowTest extends StreamTest {
   }
 
 }
-*/

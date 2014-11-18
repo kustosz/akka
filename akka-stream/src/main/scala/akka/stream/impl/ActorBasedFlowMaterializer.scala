@@ -4,7 +4,7 @@
 package akka.stream.impl
 
 import java.util.concurrent.atomic.AtomicLong
-import akka.stream.impl.fusing.{ ActorInterpreter, Op }
+import akka.stream.impl.fusing.{ ActorInterpreter, OpApi }
 import scala.annotation.tailrec
 import scala.collection.immutable
 import scala.concurrent.{ Await, Future }
@@ -42,11 +42,11 @@ private[akka] object Ast {
   case class TimerTransform(name: String, mkTransformer: () ⇒ TimerTransformer[Any, Any]) extends AstNode
 
   object OpFactory {
-    def apply(mkOp: () ⇒ Op[_, _], name: String): OpFactory =
+    def apply(mkOp: () ⇒ OpApi[_, _], name: String): OpFactory =
       OpFactory(List(mkOp), name)
   }
 
-  case class OpFactory(mkOps: List[() ⇒ Op[_, _]], name: String) extends AstNode
+  case class OpFactory(mkOps: List[() ⇒ OpApi[_, _]], name: String) extends AstNode
 
   case class MapAsync(f: Any ⇒ Future[Any]) extends AstNode {
     override def name = "mapAsync"

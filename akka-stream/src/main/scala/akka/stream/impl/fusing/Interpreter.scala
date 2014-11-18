@@ -11,10 +11,9 @@ import scala.util.control.NonFatal
 // implement grouped, buffer
 // add recover
 
-trait Op[-In, Out] {
-  type PushD <: Directive
-  type PullD <: Directive
-  type Ctxt <: Context[Out]
+sealed trait OpApi[-In, Out]
+
+abstract class Op[-In, Out, PushD <: Directive, PullD <: Directive, Ctxt <: Context[Out]] extends OpApi[In, Out] {
 
   private[fusing] var holding = false
   private[fusing] var allowedToPush = false
@@ -30,36 +29,49 @@ trait Op[-In, Out] {
   def onFailure(cause: Throwable, ctxt: Ctxt): TerminationDirective = ctxt.fail(cause)
 }
 
+abstract class DeterministicOp[In, Out] extends Op[In, Out, Directive, Directive, Context[Out]]
+
+abstract class TransitivePullOp[In, Out] extends DeterministicOp[In, Out] {
+  final override def onPull(ctxt: Context[Out]): Directive = ctxt.pull()
+}
+
+abstract class RichDeterministicOpState[In, Out] {
+  def onPush(elem: In, ctxt: Context[Out]): Directive
+  def onPull(ctxt: Context[Out]): Directive = ctxt.pull()
+}
+
 // FIXME name?
-trait RichDeterministicOp[In, Out] extends DeterministicOp[In, Out] {
-  trait State {
-    def onPush(elem: In, ctxt: Ctxt): PushD
-    def onPull(ctxt: Ctxt): PullD = ctxt.pull()
-  }
+abstract class RichDeterministicOp[In, Out] extends DeterministicOp[In, Out] {
+  abstract class State extends RichDeterministicOpState[In, Out]
 
   private var emitting = false
-  private var _current: State = _
+  private var _current: RichDeterministicOpState[In, Out] = _
   become(initial)
 
-  def initial: State
+  def initial: RichDeterministicOpState[In, Out]
 
-  final def current: State = _current
+  final def current: RichDeterministicOpState[In, Out] = _current
 
-  final def become(state: State): Unit = {
+  final def become(state: RichDeterministicOpState[In, Out]): Unit = {
     if (state == null) throw new NullPointerException
     _current = state
   }
 
-  final override def onPush(elem: In, ctxt: Ctxt): PushD = _current.onPush(elem, ctxt)
-  final override def onPull(ctxt: Ctxt): PullD = _current.onPull(ctxt)
+  final override def onPush(elem: In, ctxt: Context[Out]): Directive = _current.onPush(elem, ctxt)
+  final override def onPull(ctxt: Context[Out]): Directive = _current.onPull(ctxt)
 
-  override def onUpstreamFinish(ctxt: Ctxt): TerminationDirective =
+  override def onUpstreamFinish(ctxt: Context[Out]): TerminationDirective =
     if (emitting) ctxt.absorbTermination()
     else ctxt.finish()
 
-  final def emit(iter: Iterator[Out], ctxt: Ctxt): PushD = emit(iter, ctxt, _current)
+  final def emit(iter: Iterator[Out], ctxt: Context[Out]): Directive = emit(iter, ctxt, _current)
 
-  final def emit(iter: Iterator[Out], ctxt: Ctxt, andThenBecome: State): PushD = {
+  final def emit(iter: java.util.Iterator[Out], ctxt: Context[Out]): Directive = {
+    import scala.collection.JavaConverters._
+    emit(iter.asScala, ctxt)
+  }
+
+  final def emit(iter: Iterator[Out], ctxt: Context[Out], andThenBecome: RichDeterministicOpState[In, Out]): Directive = {
     if (emitting) throw new IllegalStateException("already in emitting state")
     if (iter.isEmpty) {
       become(andThenBecome)
@@ -74,7 +86,12 @@ trait RichDeterministicOp[In, Out] extends DeterministicOp[In, Out] {
     }
   }
 
-  final def emitAndFinish(iter: Iterator[Out], ctxt: Ctxt): PushD = {
+  final def emit(iter: java.util.Iterator[Out], ctxt: Context[Out], andThenBecome: RichDeterministicOpState[In, Out]): Directive = {
+    import scala.collection.JavaConverters._
+    emit(iter.asScala, ctxt, andThenBecome)
+  }
+
+  final def emitAndFinish(iter: Iterator[Out], ctxt: Context[Out]): Directive = {
     if (emitting) throw new IllegalStateException("already in emitting state")
     if (iter.isEmpty)
       ctxt.finish()
@@ -89,7 +106,12 @@ trait RichDeterministicOp[In, Out] extends DeterministicOp[In, Out] {
     }
   }
 
-  final def terminationEmit(iter: Iterator[Out], ctxt: Ctxt): TerminationDirective = {
+  final def emitAndFinish(iter: java.util.Iterator[Out], ctxt: Context[Out]): Directive = {
+    import scala.collection.JavaConverters._
+    emitAndFinish(iter.asScala, ctxt)
+  }
+
+  final def terminationEmit(iter: Iterator[Out], ctxt: Context[Out]): TerminationDirective = {
     val empty = iter.isEmpty
     if (empty && emitting) ctxt.absorbTermination()
     else if (empty) ctxt.finish()
@@ -99,9 +121,14 @@ trait RichDeterministicOp[In, Out] extends DeterministicOp[In, Out] {
     }
   }
 
-  private def emittingState(iter: Iterator[Out], andThenBecome: Option[State]) = new State {
-    override def onPush(elem: In, ctxt: Ctxt) = throw new IllegalStateException
-    override def onPull(ctxt: Ctxt) = {
+  final def terminationEmit(iter: java.util.Iterator[Out], ctxt: Context[Out]): TerminationDirective = {
+    import scala.collection.JavaConverters._
+    terminationEmit(iter.asScala, ctxt)
+  }
+
+  private def emittingState(iter: Iterator[Out], andThenBecome: Option[RichDeterministicOpState[In, Out]]) = new State {
+    override def onPush(elem: In, ctxt: Context[Out]) = throw new IllegalStateException
+    override def onPull(ctxt: Context[Out]) = {
       if (iter.hasNext) {
         val elem = iter.next()
         val empty = iter.isEmpty
@@ -119,28 +146,14 @@ trait RichDeterministicOp[In, Out] extends DeterministicOp[In, Out] {
   }
 }
 
-trait DeterministicOp[In, Out] extends Op[In, Out] {
-  type PushD = Directive
-  type PullD = Directive
-  type Ctxt = Context[Out]
-}
+abstract class DetachedOp[In, Out] extends Op[In, Out, UpstreamDirective, DownstreamDirective, DetachedContext[Out]]
 
-trait DetachedOp[In, Out] extends Op[In, Out] {
-  type PushD = UpstreamDirective
-  type PullD = DownstreamDirective
-  type Ctxt = DetachedContext[Out]
-}
-
-trait BoundaryOp extends Op[Any, Any] {
-  type PushD = Directive
-  type PullD = Directive
-  type Ctxt = BoundaryContext
+/**
+ * INTERNAL API
+ */
+private[akka] abstract class BoundaryOp extends Op[Any, Any, Directive, Directive, BoundaryContext] {
   private[fusing] var bctxt: BoundaryContext = _
   def enter(): BoundaryContext = bctxt
-}
-
-trait TransitivePullOp[In, Out] extends DeterministicOp[In, Out] {
-  final override def onPull(ctxt: Context[Out]): Directive = ctxt.pull()
 }
 
 sealed trait Directive
@@ -267,16 +280,12 @@ object OneBoundedInterpreter {
  * testing and finding callstack wasting bugs), in the other case the forked call is scheduled via a list -- i.e. instead
  * of the stack the heap is used.
  */
-class OneBoundedInterpreter(ops: Seq[Op[_, _]], val forkLimit: Int = 100, val overflowToHeap: Boolean = true) {
+class OneBoundedInterpreter(ops: Seq[OpApi[_, _]], val forkLimit: Int = 100, val overflowToHeap: Boolean = true) {
   import OneBoundedInterpreter._
-  type UntypedOp = Op[Any, Any] {
-    type PushD = Directive
-    type PullD = Directive
-    type Ctxt = DetachedContext[Any]
-  }
+  type UntypedOp = Op[Any, Any, Directive, Directive, DetachedContext[Any]]
   require(ops.nonEmpty, "OneBoundedInterpreter cannot be created without at least one Op")
 
-  private val pipeline = ops.toArray.asInstanceOf[Array[UntypedOp]]
+  private val pipeline = ops.map(_.asInstanceOf[UntypedOp]).toArray
 
   /**
    * This table is used to accelerate demand propagation upstream. All ops that implement TransitivePullOp are guaranteed

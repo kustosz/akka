@@ -245,7 +245,7 @@ private[akka] class ActorOutputBoundary(val actor: ActorRef) extends BoundaryOp 
 /**
  * INTERNAL API
  */
-private[akka] class ActorInterpreter(val settings: MaterializerSettings, val ops: Seq[Op[_, _]])
+private[akka] class ActorInterpreter(val settings: MaterializerSettings, val ops: Seq[OpApi[_, _]])
   extends Actor {
 
   private val upstream = new BatchingActorInputBoundary(settings.initialInputBufferSize)

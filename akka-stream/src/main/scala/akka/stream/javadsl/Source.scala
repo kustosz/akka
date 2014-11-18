@@ -4,7 +4,6 @@
 package akka.stream.javadsl
 
 import java.util.concurrent.Callable
-
 import akka.actor.ActorRef
 import akka.actor.Props
 import akka.japi.Util
@@ -12,13 +11,13 @@ import akka.stream._
 import akka.stream.scaladsl.PropsSource
 import org.reactivestreams.Publisher
 import org.reactivestreams.Subscriber
-
 import scala.annotation.unchecked.uncheckedVariance
 import scala.collection.JavaConverters._
 import scala.concurrent.Future
 import scala.concurrent.duration.FiniteDuration
 import scala.language.higherKinds
 import scala.language.implicitConversions
+import akka.stream.impl.fusing.OpApi
 
 /** Java API */
 object Source {
@@ -385,7 +384,9 @@ class Source[+Out](delegate: scaladsl.Source[Out]) {
   def buffer(size: Int, overflowStrategy: OverflowStrategy): javadsl.Source[Out] =
     new Source(delegate.buffer(size, overflowStrategy))
 
-  // FIXME add Op based transform
+  // FIXME docs
+  def transform[U](name: String, mkTransformer: japi.Creator[OpApi[Out, U]]): javadsl.Source[U] =
+    new Source(delegate.transform(name, () ⇒ mkTransformer.create()))
 
   /**
    * Transformation of a stream, with additional support for scheduled events.

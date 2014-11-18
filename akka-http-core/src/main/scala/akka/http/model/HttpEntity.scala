@@ -177,7 +177,7 @@ object HttpEntity {
         case Success(None) ⇒
           Default(contentType, newContentLength, Source.singleton(data).via(transformer))
         case Failure(ex) ⇒
-          throw ex // FIXME is this the right thing to do here?
+          Default(contentType, newContentLength, Source.failed(ex))
       }
 
     def withContentType(contentType: ContentType): Strict =

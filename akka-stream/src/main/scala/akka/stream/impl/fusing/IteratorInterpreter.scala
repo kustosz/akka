@@ -80,7 +80,7 @@ class IteratorInterpreter[I, O](val input: Iterator[I], val ops: Seq[Determinist
 
   private val upstream = IteratorUpstream(input)
   private val downstream = IteratorDownstream[O]()
-  private val interpreter = new OneBoundedInterpreter(upstream +: ops.asInstanceOf[Seq[Op[_, _]]] :+ downstream)
+  private val interpreter = new OneBoundedInterpreter(upstream +: ops.asInstanceOf[Seq[OpApi[_, _]]] :+ downstream)
   interpreter.init()
 
   def iterator: Iterator[O] = downstream

@@ -13,7 +13,7 @@ import scala.concurrent.Future
 import scala.language.higherKinds
 import akka.stream.FlowMaterializer
 import akka.stream.FlattenStrategy
-import akka.stream.impl.fusing.Op
+import akka.stream.impl.fusing.OpApi
 import akka.stream.impl.fusing.Directive
 import akka.stream.impl.fusing.Context
 
@@ -314,7 +314,7 @@ trait FlowOps[+Out] {
 
   // FIXME docs
   def transform[T](
-    name: String, mkTransformer: () ⇒ Op[Out, T]): Repr[T] = {
+    name: String, mkTransformer: () ⇒ OpApi[Out, T]): Repr[T] = {
     andThen(OpFactory(mkTransformer, name))
   }
 

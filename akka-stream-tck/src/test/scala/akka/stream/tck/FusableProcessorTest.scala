@@ -8,7 +8,7 @@ import akka.stream.impl.{ Ast, ActorBasedFlowMaterializer }
 import akka.stream.{ FlowMaterializer, MaterializerSettings }
 import org.reactivestreams.{ Publisher, Processor }
 import akka.stream.impl.fusing.Map
-import akka.stream.impl.fusing.Op
+import akka.stream.impl.fusing.OpApi
 import akka.stream.impl.fusing.Context
 import akka.stream.impl.fusing.Directive
 
@@ -24,7 +24,7 @@ class FusableProcessorTest extends AkkaIdentityProcessorVerification[Int] {
 
     val flowName = getClass.getSimpleName + "-" + processorCounter.incrementAndGet()
 
-    def op(): Op[Int, Int] = Map[Int, Int](identity)
+    def op(): OpApi[Int, Int] = Map[Int, Int](identity)
 
     val processor = materializer.asInstanceOf[ActorBasedFlowMaterializer].processorForNode(
       Ast.OpFactory(List(() ⇒ op(), () ⇒ op(), () ⇒ op()), "identity"), flowName, 1)

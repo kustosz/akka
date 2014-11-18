@@ -5,7 +5,7 @@ package akka.stream.scaladsl
 
 import java.util.concurrent.atomic.AtomicLong
 
-import akka.stream.impl.fusing.{ Op, ActorInterpreter }
+import akka.stream.impl.fusing.{ OpApi, ActorInterpreter }
 
 import scala.collection.immutable
 import scala.concurrent.duration._
@@ -32,7 +32,7 @@ object FlowSpec {
 
   class BrokenActorInterpreter(
     _settings: MaterializerSettings,
-    _ops: Seq[Op[_, _]],
+    _ops: Seq[OpApi[_, _]],
     brokenMessage: Any)
     extends ActorInterpreter(_settings, _ops) {
 

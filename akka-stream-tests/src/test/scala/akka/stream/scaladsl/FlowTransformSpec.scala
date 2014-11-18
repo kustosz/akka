@@ -66,7 +66,7 @@ class FlowTransformSpec extends AkkaSpec(ConfigFactory.parseString("akka.actor.d
 
           override def initial = waitForNext
 
-          override def onUpstreamFinish(ctxt: Ctxt): TerminationDirective = {
+          override def onUpstreamFinish(ctxt: Context[Int]): TerminationDirective = {
             if (current eq waitForNext) ctxt.finish()
             else ctxt.absorbTermination()
           }
