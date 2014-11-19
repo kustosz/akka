@@ -3,7 +3,7 @@
  */
 package akka.stream.impl
 
-import akka.stream.ReactiveStreamsConstants
+import akka.stream.ReactiveStreamsCompliance
 
 import scala.annotation.switch
 import scala.annotation.tailrec
@@ -49,7 +49,7 @@ private[akka] trait SubscriptionWithCursor[T] extends Subscription with Resizabl
     val noOverflow = sum > 0
 
     if (noOverflow) totalDemand = sum
-    else subscriber.onError(new IllegalStateException(s"Total pending demand ($totalDemand + $demand) would overflow `Long`, for Subscriber $subscriber! ${ReactiveStreamsConstants.TotalPendingDemandMustNotExceedLongMaxValue}"))
+    else subscriber.onError(new IllegalStateException(s"Total pending demand ($totalDemand + $demand) would overflow `Long`, for Subscriber $subscriber! ${ReactiveStreamsCompliance.TotalPendingDemandMustNotExceedLongMaxValue}"))
 
     sum
   }
@@ -215,7 +215,7 @@ private[akka] trait SubscriberManagement[T] extends ResizableMultiReaderRingBuff
    */
   protected def registerSubscriber(subscriber: Subscriber[_ >: T]): Unit = endOfStream match {
     case NotReached if subscriptions.exists(_.subscriber eq subscriber) ⇒
-      subscriber.onError(new IllegalStateException(s"${getClass.getSimpleName} [${this}, sub: $subscriber] ${ReactiveStreamsConstants.CanNotSubscribeTheSameSubscriberMultipleTimes}"))
+      subscriber.onError(new IllegalStateException(s"${getClass.getSimpleName} [${this}, sub: $subscriber] ${ReactiveStreamsCompliance.CanNotSubscribeTheSameSubscriberMultipleTimes}"))
     case NotReached ⇒
       val newSubscription = createSubscription(subscriber)
       subscriptions ::= newSubscription

@@ -7,7 +7,7 @@ import org.reactivestreams.{ Subscription, Subscriber, Publisher }
 
 import scala.util.control.NonFatal
 
-object ReactiveStreamsConstants {
+object ReactiveStreamsCompliance {
 
   final val CanNotSubscribeTheSameSubscriberMultipleTimes =
     "can not subscribe the same subscriber multiple times (see reactive-streams specification, rules 1.10 and 2.12)"
